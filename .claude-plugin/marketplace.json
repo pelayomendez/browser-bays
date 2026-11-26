@@ -1,0 +1,17 @@
+{
+  "name": "pelayomendez-browser-bays",
+  "owner": {
+    "name": "Pelayo Méndez",
+    "url": "https://github.com/pelayomendez"
+  },
+  "plugins": [
+    {
+      "name": "browser-bays",
+      "source": "./",
+      "description": "One coloured, persistent controlled browser per Claude Code session for runtime testing",
+      "homepage": "https://github.com/pelayomendez/browser-bays",
+      "category": "development"
+    }
+  ],
+  "description": "browser-bays: one coloured, persistent controlled browser per Claude Code session"
+}

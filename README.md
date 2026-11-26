@@ -14,6 +14,13 @@ testing with [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devt
   opens a pane with every bay and who holds it.
 - **The model sees one browser.** Only the session's bay tools are connected (`mcp__plugin_browser-bays_<bay>__*`).
 
+## Install
+
+```
+/plugin marketplace add pelayomendez/browser-bays
+/plugin install browser-bays@pelayomendez-browser-bays
+```
+
 ## Config
 
 `~/.browser-bays/config.json` (written on first use; `BROWSER_BAYS_HOME` moves it):
