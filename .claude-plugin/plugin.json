@@ -1,12 +1,50 @@
 {
   "name": "browser-bays",
   "version": "0.1.0",
-  "description": "One coloured, persistent controlled browser per Claude session for runtime testing (chrome-devtools-mcp bays).",
+  "description": "One coloured, persistent controlled browser per Claude Code session for runtime tests: assigned automatically, logged in once, described by the agent, closed when idle.",
+  "author": {
+    "name": "Pelayo Méndez",
+    "url": "https://github.com/pelayomendez"
+  },
+  "homepage": "https://pelayomendez.github.io/browser-bays/",
+  "repository": "https://github.com/pelayomendez/browser-bays",
+  "license": "MIT",
+  "keywords": [
+    "browser",
+    "chrome-devtools-mcp",
+    "testing",
+    "ui-testing",
+    "parallel-agents",
+    "mcp",
+    "firefox",
+    "runtime-tests"
+  ],
+  "icon": "./.claude-plugin/icon.png",
   "types": "./types/index.d.ts",
   "mcpServers": {
-    "bay-1": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server", "args": ["bay-1"] },
-    "bay-2": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server", "args": ["bay-2"] },
-    "bay-3": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server", "args": ["bay-3"] },
-    "bay-4": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server", "args": ["bay-4"] }
+    "bay-1": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server",
+      "args": [
+        "bay-1"
+      ]
+    },
+    "bay-2": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server",
+      "args": [
+        "bay-2"
+      ]
+    },
+    "bay-3": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server",
+      "args": [
+        "bay-3"
+      ]
+    },
+    "bay-4": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server",
+      "args": [
+        "bay-4"
+      ]
+    }
   }
 }
