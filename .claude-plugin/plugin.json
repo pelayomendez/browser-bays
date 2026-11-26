@@ -1,0 +1,12 @@
+{
+  "name": "browser-bays",
+  "version": "0.1.0",
+  "description": "One coloured, persistent controlled browser per Claude session for runtime testing (chrome-devtools-mcp bays).",
+  "types": "./types/index.d.ts",
+  "mcpServers": {
+    "bay-1": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server", "args": ["bay-1"] },
+    "bay-2": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server", "args": ["bay-2"] },
+    "bay-3": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server", "args": ["bay-3"] },
+    "bay-4": { "command": "${CLAUDE_PLUGIN_ROOT}/bin/bay-server", "args": ["bay-4"] }
+  }
+}

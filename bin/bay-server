@@ -1,0 +1,40 @@
+#!/bin/sh
+# Starts chrome-devtools-mcp for one bay: its own persistent profile, its
+# colour, headless if the bay says so. Refuses when another session holds it.
+set -eu
+BAY="$1"
+HOME_DIR="${BROWSER_BAYS_HOME:-$HOME/.browser-bays}"
+RUN="$HOME_DIR/run"
+mkdir -p "$RUN"
+PIDFILE="$RUN/$BAY.pid"
+WANT="$RUN/$BAY.want"
+
+# Only a session whose browser-bays mod asked for this bay (fresh .want file,
+# under a minute old) may claim it; any other dial exits without claiming.
+if [ -z "$(find "$WANT" -mmin -1 2>/dev/null)" ]; then
+  echo "browser-bays: $BAY was not requested by this session" >&2
+  exit 75
+fi
+rm -f "$WANT"
+
+if [ -f "$PIDFILE" ]; then
+  OLD="$(cat "$PIDFILE" 2>/dev/null || true)"
+  if [ -n "$OLD" ] && kill -0 "$OLD" 2>/dev/null; then
+    echo "browser-bays: $BAY is held by another session (pid $OLD)" >&2
+    exit 75
+  fi
+  rm -f "$PIDFILE"
+fi
+# Atomic claim: fails if another launcher wrote the file first.
+if ! ( set -C; echo "$$" > "$PIDFILE" ) 2>/dev/null; then
+  echo "browser-bays: $BAY was claimed by another session" >&2
+  exit 75
+fi
+
+# prepare.mjs ensures the config and profile, applies the colour and prints
+# the chrome-devtools-mcp arguments, one per line.
+ARGS_FILE="$RUN/$BAY.args"
+node "$(dirname "$0")/prepare.mjs" "$BAY" "$HOME_DIR" > "$ARGS_FILE"
+set --
+while IFS= read -r line; do set -- "$@" "$line"; done < "$ARGS_FILE"
+exec "$@"
