@@ -32,6 +32,7 @@ testing with [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devt
 {
   "package": "chrome-devtools-mcp@latest",
   "autoAssign": true,
+  "idleMinutes": 10,
   "holdServers": ["chrome-devtools"],
   "bays": [
     { "id": "bay-1", "name": "red", "color": "#E5484D", "emoji": "🔴", "headless": false }
@@ -41,6 +42,8 @@ testing with [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devt
 
 - `holdServers`: other MCP servers to keep out of sessions (e.g. your own
   chrome-devtools entries), so agents use the bay only.
+- `idleMinutes`: close a bay's browser after this many minutes without a browser
+  call (default 10, `0` keeps it open); it reopens on the next call, login kept.
 - `headless`: run that bay without a window (log in with it visible first).
 - Bay ids `bay-1`…`bay-4` are fixed by the plugin manifest; names, colours and
   flags are yours.

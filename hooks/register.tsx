@@ -32,9 +32,33 @@ const DEFAULT_DRIVERS: Record<string, Driver> = {
   'firefox-devtools': { label: 'Firefox (firefox-devtools-mcp)', command: 'npx', process: '{profile}' },
 }
 
-type Config = { bays: Bay[]; holdServers: string[]; autoAssign: boolean; drivers: Record<string, Driver> }
+type Config = {
+  bays: Bay[]
+  holdServers: string[]
+  autoAssign: boolean
+  drivers: Record<string, Driver>
+  /** Minutes without a browser call before the bay's browser is closed; 0 keeps it open. */
+  idleMinutes: number
+}
 
 let homeDir: string | null = null
+
+// When this session last used its bay's browser (a reload starts it afresh).
+let lastUse = 0
+
+// Closes the bay's browser after idleMinutes without a browser call, so an idle
+// bay holds no memory. The driver relaunches it, login kept, on the next call.
+async function idleCheck($: Dollar) {
+  const mine = await read($, assigned)
+  if (!mine) return
+  const { idleMinutes } = await config($)
+  if (!idleMinutes || idleMinutes <= 0) return
+  if ((await $.clock.now()) - lastUse < idleMinutes * 60_000) return
+  const pid = await chromePid($, mine)
+  if (!pid) return
+  await $.process.run(['kill', pid])
+  $.ui.toast(`Bay ${mine.name}: browser closed after ${idleMinutes} idle minutes; it reopens on the next browser call.`)
+}
 
 async function home($: Dollar): Promise<string> {
   if (homeDir) return homeDir
@@ -53,9 +77,10 @@ async function config($: Dollar): Promise<Config> {
       holdServers: Array.isArray(parsed.holdServers) ? parsed.holdServers : [],
       autoAssign: parsed.autoAssign !== false,
       drivers: { ...DEFAULT_DRIVERS, ...(parsed.drivers ?? {}) },
+      idleMinutes: typeof parsed.idleMinutes === 'number' ? parsed.idleMinutes : 10,
     }
   } catch {
-    return { bays: DEFAULT_BAYS, holdServers: [], autoAssign: true, drivers: DEFAULT_DRIVERS }
+    return { bays: DEFAULT_BAYS, holdServers: [], autoAssign: true, drivers: DEFAULT_DRIVERS, idleMinutes: 10 }
   }
 }
 
@@ -235,6 +260,7 @@ async function assignFirstFree($: Dollar) {
 }
 
 async function focus($: Dollar): Promise<string> {
+  lastUse = await $.clock.now()
   const mine = await read($, assigned)
   if (!mine) return 'This session has no bay.'
   if (mine.headless) return `Bay ${mine.name} is headless: there is no window to show.`
@@ -359,6 +385,10 @@ export const register: Register = on => {
       isDeferred: false,
     })
     const result = await next(e)
+    lastUse = await $.clock.now()
+    $.clock.every(60_000, () => {
+      void idleCheck($)
+    })
     if (!(await read($, assigned))) {
       const { autoAssign } = await config($)
       if (autoAssign && e.isInteractive) {
@@ -380,6 +410,13 @@ export const register: Register = on => {
     if (text === (await read($, briefSent))) return next(e)
     await update($, briefSent, () => text)
     return next({ ...e, context: [...(e.context ?? []), text] })
+  })
+
+  on('tool.call', { tool: /^mcp__plugin_browser-bays_/ }, async ($, e, next) => {
+    lastUse = await $.clock.now()
+    const ran = await next(e)
+    lastUse = await $.clock.now()
+    return ran
   })
 
   on('tool.run', { tool: 'mcp__browser-bays__bay_info' }, async $ => {
