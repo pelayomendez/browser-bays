@@ -9,9 +9,12 @@ testing with [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devt
 - **One per session.** Every bay server is held back at session start; the session
   connects the first free bay (or the one you take with `/bay <name>`). A bay is
   held while its server process lives, so it frees itself when the session ends.
-- **Visible.** A band above the prompt and the status line show the session's bay
+- **Visible.** A band above the prompt shows the session's bay
   in its colour; **Focus** brings that bay's Chrome window to the front. `/bays`
   opens a pane with every bay and who holds it.
+- **Agents describe their bay.** Tools `bay_info` and `bay_describe` let the agent
+  record the app, URL, dev-server port and notes it uses the bay for, and see the
+  ports other sessions took; `/bays` shows every bay's description.
 - **The model sees one browser.** Only the session's bay tools are connected (`mcp__plugin_browser-bays_<bay>__*`).
 
 ## Install
@@ -69,7 +72,7 @@ the session's bay (applies the next time the bay starts).
 - `/bay` or `/bay focus`: bring this session's browser to the front.
 - `/bay <name>`: take a bay when the session has none.
 - `/bay driver [name]`: show or change the bay's driver.
-- `/bay headless on|off`, `/bay app|url|notes <text>`, `/bay save`: mode and instructions.
+- `/bay headless on|off`, `/bay app|url|port|notes <text>`, `/bay save`: mode and instructions.
 - `/bays`: show all bays.
 
 Requires Node.js (npx) and Chrome. Focus uses `osascript` on macOS, falling back

@@ -9,6 +9,7 @@ export type Bay = {
   /** What this bay is for: the app under test, its URL, free notes. */
   app?: string
   url?: string
+  port?: string
   notes?: string
 }
 
@@ -25,12 +26,14 @@ export type Driver = {
 export type Assigned = Bay & { server: string }
 
 /** Per-session instructions; each field overrides the bay's own. */
-export type Brief = { app?: string; url?: string; notes?: string }
+export type Brief = { app?: string; url?: string; port?: string; notes?: string }
 
 export type BayRow = Bay & {
   state: 'mine' | 'taken' | 'free'
   holderPid?: string
   isChromeRunning: boolean
+  /** What the holding session says it uses the bay for. */
+  brief?: Brief
 }
 
 declare module 'claude-code' {

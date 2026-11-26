@@ -99,9 +99,11 @@ async function refreshRows($: Dollar) {
   const list: BayRow[] = []
   for (const bay of bays) {
     const pid = await holderPid($, bay)
+    const state = mine?.id === bay.id ? 'mine' : pid ? 'taken' : 'free'
     list.push({
       ...bay,
-      state: mine?.id === bay.id ? 'mine' : pid ? 'taken' : 'free',
+      state,
+      brief: state === 'taken' ? await sharedBrief($, bay) : undefined,
       holderPid: pid,
       isChromeRunning: Boolean(await chromePid($, bay)),
     })
@@ -109,9 +111,10 @@ async function refreshRows($: Dollar) {
   await update($, rows, () => list)
 }
 
+// The band above the prompt shows the bay; the status line stays free.
 async function showStatus($: Dollar) {
-  const mine = await read($, assigned)
-  $.ui.status(mine ? `${mine.emoji} bay ${mine.name} · ${driverOf(mine).replace(/-devtools$/, '')} · ${mine.headless ? 'headless' : 'visible'}` : '◌ no bay')
+  $.ui.status(undefined)
+  $.ui.invalidate('ui.render')
 }
 
 async function take($: Dollar, bay: Bay): Promise<string | null> {
@@ -128,6 +131,7 @@ async function take($: Dollar, bay: Bay): Promise<string | null> {
   await update($, retired, list => list.filter(id => id !== bay.id))
   await update($, briefSent, () => null)
   if (old && old.id !== bay.id) await release($, old)
+  await writeSharedBrief($)
   return null
 }
 
@@ -160,12 +164,48 @@ async function saveBay($: Dollar, id: string, patch: Partial<Bay>) {
   if (mine?.id === id) await update($, assigned, a => (a ? { ...a, ...patch } : a))
 }
 
+// The session's description of its bay, shared with other sessions through
+// run/<bay>.brief.json so /bays everywhere shows what each bay is used for.
+async function setBrief($: Dollar, patch: Brief) {
+  const next_ = { ...(await read($, brief)) }
+  for (const [k, v] of Object.entries(patch) as [keyof Brief, string | undefined][]) {
+    if (v === undefined) continue
+    if (v === '') delete next_[k]
+    else next_[k] = v
+  }
+  await update($, brief, () => next_)
+  await update($, briefSent, () => null)
+  await writeSharedBrief($)
+}
+
+async function writeSharedBrief($: Dollar) {
+  const mine = await effective($)
+  if (!mine) return
+  const run = `${await home($)}/run`
+  await $.process.run(['mkdir', '-p', run])
+  const { app, url, port, notes } = mine
+  await $.fs.write(`${run}/${mine.id}.brief.json`, JSON.stringify({ app, url, port, notes }))
+}
+
+async function sharedBrief($: Dollar, bay: Bay): Promise<Brief | undefined> {
+  try {
+    const raw = await $.fs.read(`${await home($)}/run/${bay.id}.brief.json`)
+    return JSON.parse(typeof raw === 'string' ? raw : '{}')
+  } catch {
+    return undefined
+  }
+}
+
+function summary(b: Brief): string {
+  return [b.app, b.url, b.port ? `port ${b.port}` : undefined].filter(Boolean).join(' · ')
+}
+
 // What this session's browser is for: the session's brief over the bay's own.
 async function effective($: Dollar): Promise<(Assigned & Brief) | null> {
   const mine = await read($, assigned)
   if (!mine) return null
   const b = await read($, brief)
-  return { ...mine, app: b.app ?? mine.app, url: b.url ?? mine.url, notes: b.notes ?? mine.notes }
+  return { ...mine, app: b.app ?? mine.app, url: b.url ?? mine.url, port: b.port ?? mine.port, notes: b.notes ?? mine.notes }
 }
 
 function toolPrefix(server: string) {
@@ -179,7 +219,9 @@ function describe(bay: Assigned & Brief): string {
   ]
   if (bay.app) lines.push(`App under test: ${bay.app}.`)
   if (bay.url) lines.push(`Target URL: ${bay.url} (navigate there for UI checks unless told otherwise).`)
+  if (bay.port) lines.push(`Dev server port reserved for this bay: ${bay.port}.`)
   if (bay.notes) lines.push(`Notes: ${bay.notes}`)
+  lines.push('Record what you use the bay for (app, url, port, notes) with the browser-bays bay_describe tool; bay_info shows every bay and the ports other sessions use.')
   return lines.join('\n')
 }
 
@@ -234,6 +276,28 @@ async function focus($: Dollar): Promise<string> {
 }
 
 
+async function infoText($: Dollar): Promise<string> {
+  await refreshRows($)
+  const bay = await effective($)
+  const list = await read($, rows)
+  const out = [
+    bay
+      ? `This session: bay ${bay.name} (${driverOf(bay)}, ${bay.headless ? 'headless' : 'visible'}) · app: ${bay.app ?? '—'} · url: ${bay.url ?? '—'} · port: ${bay.port ?? '—'} · notes: ${bay.notes ?? '—'}`
+      : 'This session has no bay.',
+    'All bays:',
+  ]
+  for (const r of list) {
+    const b = r.state === 'mine' && bay ? bay : r.state === 'taken' ? r.brief ?? {} : r
+    out.push(`- ${r.name}: ${r.state === 'mine' ? 'this session' : r.state === 'taken' ? 'another session' : 'free'}${summary(b) ? ` · ${summary(b)}` : ''}`)
+  }
+  const ports = list
+    .filter(r => r.state === 'taken')
+    .map(r => r.brief?.port)
+    .filter(Boolean)
+  out.push(ports.length ? `Ports used by other sessions' bays: ${ports.join(', ')}.` : 'No ports recorded by other sessions.')
+  return out.join('\n')
+}
+
 async function openPane($: Dollar) {
   await refreshRows($)
   await $.ui.open({ id: PANE, title: 'Browser bays' })
@@ -270,7 +334,29 @@ export const register: Register = on => {
     await $.command.register({ name: 'bays', description: 'Show the browser bays and which session holds each' })
     await $.command.register({
       name: 'bay',
-      description: 'This session’s browser bay: /bay, /bay <name>, /bay focus, /bay driver <name>, /bay headless on|off, /bay app|url|notes <text>, /bay save',
+      description: 'This session’s browser bay: /bay, /bay <name>, /bay focus, /bay driver <name>, /bay headless on|off, /bay app|url|port|notes <text>, /bay save',
+    })
+    await $.tool.register({
+      name: 'bay_info',
+      description:
+        "Show this session's browser bay (driver, visible/headless, app, url, port, notes) and every other bay with what its session uses it for, including the dev-server ports other sessions have taken. Call before starting a dev server or a UI check.",
+      inputSchema: { type: 'object', properties: {} },
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'bay_describe',
+      description:
+        "Record what this session uses its browser bay for, so the person and other sessions see it: the app under test, the URL the browser should use, the dev-server port this session took, and free notes. Only the fields given change; an empty string clears one.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          app: { type: 'string', description: 'App under test, e.g. "Projects"' },
+          url: { type: 'string', description: 'URL the bay browser targets, e.g. "http://localhost:3001"' },
+          port: { type: 'string', description: 'Dev-server port this session uses, e.g. "3001"' },
+          notes: { type: 'string', description: 'Anything else: test project, account, branch' },
+        },
+      },
+      isDeferred: false,
     })
     const result = await next(e)
     if (!(await read($, assigned))) {
@@ -296,6 +382,20 @@ export const register: Register = on => {
     return next({ ...e, context: [...(e.context ?? []), text] })
   })
 
+  on('tool.run', { tool: 'mcp__browser-bays__bay_info' }, async $ => {
+    const text = await infoText($)
+    return { result: text, text }
+  })
+
+  on('tool.run', { tool: 'mcp__browser-bays__bay_describe' }, async ($, e) => {
+    const input = e as unknown as Brief
+    if (!(await read($, assigned))) return { deny: 'This session has no bay. Ask the person to take one with /bay <name>.' }
+    await setBrief($, { app: input.app, url: input.url, port: input.port, notes: input.notes })
+    await showStatus($)
+    const text = await infoText($)
+    return { result: text, text }
+  })
+
   on('command.run', { command: 'bays' }, async $ => {
     await openPane($)
     return { text: 'Browser bays pane opened.' }
@@ -315,6 +415,7 @@ export const register: Register = on => {
           `${bay.emoji} bay ${bay.name} · ${driverOf(bay)} · ${bay.headless ? 'headless' : 'visible'}`,
           `app: ${bay.app ?? '—'}`,
           `url: ${bay.url ?? '—'}`,
+          `port: ${bay.port ?? '—'}`,
           `notes: ${bay.notes ?? '—'}`,
         ].join('\n'),
       }
@@ -344,9 +445,9 @@ export const register: Register = on => {
       return { text: `Bay ${mine.name} will run ${restWords[0]} the next time it starts (a new session, or taking it again from another session).` }
     }
 
-    if (verb === 'app' || verb === 'url' || verb === 'notes') {
+    if (verb === 'app' || verb === 'url' || verb === 'notes' || verb === 'port') {
       if (!mine) return { text: 'This session has no bay.' }
-      await update($, brief, b => ({ ...b, [verb]: rest || undefined }))
+      await setBrief($, { [verb]: rest })
       return { text: rest ? `This session's ${verb}: ${rest}` : `Cleared this session's ${verb}.` }
     }
 
@@ -355,6 +456,7 @@ export const register: Register = on => {
       const b = await read($, brief)
       await saveBay($, mine.id, b)
       await update($, brief, () => ({}))
+      await writeSharedBrief($)
       return { text: `Saved as bay ${mine.name}'s defaults.` }
     }
 
@@ -381,7 +483,7 @@ export const register: Register = on => {
         </Box>
       )
     }
-    const what = [bay.app, bay.url].filter(Boolean).join(' → ')
+    const what = [bay.app, bay.url, bay.port ? `:${bay.port}` : undefined].filter(Boolean).join(' → ')
     return (
       <Box>
         <Text color={bay.color} bold>● bay {bay.name}</Text>
@@ -400,9 +502,8 @@ export const register: Register = on => {
       <Box flexDirection="column">
         {list.length === 0 && <Text dimColor>No bays configured.</Text>}
         {list.map(row => {
-          const app = row.state === 'mine' ? b.app ?? row.app : row.app
-          const url = row.state === 'mine' ? b.url ?? row.url : row.url
-          const notes = row.state === 'mine' ? b.notes ?? row.notes : row.notes
+          const src: Brief = row.state === 'mine' ? { ...row, ...b } : row.state === 'taken' ? row.brief ?? {} : row
+          const { app, url, port, notes } = src
           return (
             <Box key={row.id} flexDirection="column">
               <Box>
@@ -432,7 +533,7 @@ export const register: Register = on => {
                   />
                 )}
               </Box>
-              <Text dimColor>   app: {app ?? '—'} · url: {url ?? '—'}{notes ? ` · ${notes}` : ''}</Text>
+              <Text dimColor>   app: {app ?? '—'} · url: {url ?? '—'}{port ? ` · port ${port}` : ''}{notes ? ` · ${notes}` : ''}</Text>
             </Box>
           )
         })}
