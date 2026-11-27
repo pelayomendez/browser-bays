@@ -28,12 +28,15 @@ export type Assigned = Bay & { server: string }
 /** Per-session instructions; each field overrides the bay's own. */
 export type Brief = { app?: string; url?: string; port?: string; notes?: string }
 
+/** allowed: an allow rule skips auto-mode review; none: no rule; held: a deny or ask rule wins; unreadable: settings file could not be read. */
+export type RuleState = 'allowed' | 'none' | 'held' | 'unreadable'
+
 export type BayRow = Bay & {
   state: 'mine' | 'taken' | 'free'
   holderPid?: string
   isChromeRunning: boolean
-  /** The user's settings allow this bay's tools, so auto mode does not review them. */
-  isAllowed: boolean
+  /** What the user settings file says about this bay's tools under auto mode. */
+  ruleState: RuleState
   /** What the holding session says it uses the bay for. */
   brief?: Brief
 }
