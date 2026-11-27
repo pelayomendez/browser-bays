@@ -57,11 +57,33 @@ To keep your own browser MCP servers out of sessions, so agents only use their b
 | `/bay` | This session's bay: driver, mode, app, URL, port, notes |
 | `/bay <name>` | Take that bay (moving from the current one) |
 | `/bay focus` | Bring the bay's window to the front |
+| `/bay allow` | Which bays auto mode lets agents drive, and the rule for each |
 | `/bay app\|url\|port\|notes <text>` | Describe what this session uses the bay for |
 | `/bay save` | Keep that description as the bay's default |
 | `/bay headless on\|off` | Run the bay without a window (from its next start) |
 | `/bay driver [name]` | Show or change the bay's driver (from its next start) |
 | `/bays` | All bays, who holds each, what for |
+
+## Permissions under auto mode
+
+In auto mode a classifier reviews each tool call that no permission rule covers. Looking at a page (navigate, snapshot, screenshot) usually passes; editing through it (a click on Save or Remove, Enter to commit a field) can be refused as a destructive action. The fix is an allow rule per bay in your user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`), because [allow rules resolve before the classifier](https://code.claude.com/docs/en/permission-modes.md#how-the-classifier-evaluates-actions):
+
+```json
+"permissions": {
+  "allow": [
+    "mcp__plugin_browser-bays_bay-1__*",
+    "mcp__plugin_browser-bays_bay-2__*"
+  ]
+}
+```
+
+`/bay allow` lists each bay with its rule and what your user settings say about it. In `/bays`, **Allow** on a bay adds its rule to your user settings. The plugin never adds a rule on its own, and an agent cannot press the button. If the settings file cannot be read, or a deny or ask rule already covers the bay (those win over allow), Allow leaves the file alone and tells you why. Rules in project or managed settings are not shown.
+
+- **Per bay, not per plugin.** Claude Code has no allow glob across servers (`mcp__plugin_browser-bays_*` is skipped), so the rule names one bay. That is also the useful scope: the risk lives in a bay's profile and the logins in it. Leave a bay unallowed if it is logged in somewhere you do not want agents clicking unattended.
+- **Bays are shared.** A rule follows the bay, not the session: every session that takes that bay, now or later, drives it without review.
+- **Subagents need the rule.** Under auto mode the classifier judges a subagent's calls with [the main session's allow rules](https://code.claude.com/docs/en/sub-agents.md#control-subagent-capabilities), so a settings rule covers them.
+- **One-off approvals don't stick.** Approving a refused call covers what that approval named. In practice that was the exact call, page id included, and the page id changes whenever the bay's browser restarts, so it did not match the next call or reach a subagent.
+- **Reads only.** To let agents look but still review edits, allow single tools instead of `__*`, e.g. `mcp__plugin_browser-bays_bay-2__take_snapshot`. Leave `evaluate_script` out: it runs any script, clicks included. Tool names follow the bay's driver.
 
 ## Config
 

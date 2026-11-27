@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface as Dollar, Register } from 'claude-code'
 
-import type { Assigned, Bay, BayRow, Brief, Driver } from '../types'
+import type { Assigned, Bay, BayRow, Brief, Driver, RuleState } from '../types'
 
 // One coloured, persistent chrome-devtools-mcp browser ("bay") per session.
 // The manifest declares the bay servers; every one is held back at session
@@ -121,6 +121,7 @@ async function chromePid($: Dollar, bay: Bay): Promise<string | undefined> {
 async function refreshRows($: Dollar) {
   const { bays } = await config($)
   const mine = await read($, assigned)
+  const settings = await loadSettings($, await settingsPath($))
   const list: BayRow[] = []
   for (const bay of bays) {
     const pid = await holderPid($, bay)
@@ -131,6 +132,7 @@ async function refreshRows($: Dollar) {
       brief: state === 'taken' ? await sharedBrief($, bay) : undefined,
       holderPid: pid,
       isChromeRunning: Boolean(await chromePid($, bay)),
+      ruleState: bayRuleState(settings, bay),
     })
   }
   await update($, rows, () => list)
@@ -235,6 +237,97 @@ async function effective($: Dollar): Promise<(Assigned & Brief) | null> {
 
 function toolPrefix(server: string) {
   return `mcp__${server.replace(/[^A-Za-z0-9_-]/g, '_')}__`
+}
+
+// Auto mode: settings allow rules resolve before the classifier, and subagents
+// are judged against the main session's rules, so a bay whose edits should run
+// unattended needs one rule in the user's settings. The plugin never adds it on
+// its own: only the Allow button in /bays (a person's click) writes it.
+function allowRule(bay: Bay): string {
+  return `${toolPrefix(`plugin:${PLUGIN}:${bay.id}`)}*`
+}
+
+async function settingsPath($: Dollar): Promise<string> {
+  const { stdout } = await $.process.run(['printenv', 'CLAUDE_CONFIG_DIR'])
+  if (stdout.trim()) return `${stdout.trim()}/settings.json`
+  const h = await $.process.run(['printenv', 'HOME'])
+  return `${h.stdout.trim()}/.claude/settings.json`
+}
+
+type Json = Record<string, unknown>
+const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+// The user's settings as an object, {} when the file does not exist, or null
+// when it exists but cannot be read or is not a settings object. Writers must
+// stop on null: writing then would replace the user's file.
+async function loadSettings($: Dollar, path: string): Promise<Json | null> {
+  // Only a clear "no" means missing; an empty or odd answer means unknown.
+  const probe = await $.process.run(['sh', '-c', 'if test -e "$1"; then echo yes; elif test -d "$(dirname "$1")"; then echo no; fi', 'sh', path])
+  const seen = probe.stdout.trim()
+  if (seen === 'no') return {}
+  if (seen !== 'yes') return null
+  try {
+    const raw = await $.fs.read(path)
+    if (typeof raw !== 'string') return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!isObject(parsed)) return null
+    if (parsed.permissions !== undefined && !isObject(parsed.permissions)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function rules(settings: Json | null, list: 'allow' | 'ask' | 'deny'): string[] {
+  const perms = settings && isObject(settings.permissions) ? settings.permissions : {}
+  const v = perms[list]
+  return Array.isArray(v) ? v.filter((r): r is string => typeof r === 'string') : []
+}
+
+// What the user settings file says about a bay's tools. Project, local and
+// managed settings are not read, so this speaks for the user file only.
+function bayRuleState(settings: Json | null, bay: Bay): RuleState {
+  if (!settings) return 'unreadable'
+  const rule = allowRule(bay)
+  const server = rule.replace(/__\*$/, '')
+  const hits = (r: string) => r === rule || r === server || r === 'mcp__*' || r === '*'
+  if (rules(settings, 'deny').some(hits) || rules(settings, 'ask').some(hits)) return 'held'
+  return rules(settings, 'allow').some(r => r === rule || r === server) ? 'allowed' : 'none'
+}
+
+async function allowBay($: Dollar, bay: Bay): Promise<string> {
+  const path = await settingsPath($)
+  const rule = allowRule(bay)
+  const settings = await loadSettings($, path)
+  const state = bayRuleState(settings, bay)
+  if (!settings || state === 'unreadable') return `Could not read ${path} as settings, so it was left alone. Add "${rule}" to permissions.allow yourself (/permissions).`
+  if (state === 'allowed') return `Bay ${bay.name} is already allowed in ${path}.`
+  if (state === 'held') return `A deny or ask rule in ${path} covers bay ${bay.name}; an allow rule would not change that. Edit it yourself if you want the bay allowed.`
+  const permissions = isObject(settings.permissions) ? settings.permissions : {}
+  const next = { ...settings, permissions: { ...permissions, allow: [...rules(settings, 'allow'), rule] } }
+  try {
+    await $.fs.write(path, JSON.stringify(next, null, 2) + '\n')
+  } catch {
+    return `Could not write ${path}. Add "${rule}" to permissions.allow yourself (/permissions).`
+  }
+  return `Added "${rule}" to ${path}. Sessions and their subagents now drive bay ${bay.name} without auto-mode review.`
+}
+
+const RULE_WORDS: Record<RuleState, string> = {
+  allowed: 'allowed',
+  none: 'no rule',
+  held: 'deny/ask rule',
+  unreadable: 'unreadable',
+}
+
+async function allowText($: Dollar): Promise<string> {
+  const { bays } = await config($)
+  const path = await settingsPath($)
+  const settings = await loadSettings($, path)
+  const out = [`Under auto mode, clicks and key presses in a bay need an allow rule. Your user settings (${path}):`]
+  for (const bay of bays) out.push(`  ${bay.emoji} ${bay.name.padEnd(6)} ${RULE_WORDS[bayRuleState(settings, bay)].padEnd(13)} ${allowRule(bay)}`)
+  out.push('Press Allow on a bay in /bays to add its rule, or add it with /permissions. Bays are shared: a rule covers every session that takes that bay. Rules in project or managed settings are not shown here.')
+  return out.join('\n')
 }
 
 function describe(bay: Assigned & Brief): string {
@@ -360,7 +453,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'bays', description: 'Show the browser bays and which session holds each' })
     await $.command.register({
       name: 'bay',
-      description: 'This session’s browser bay: /bay, /bay <name>, /bay focus, /bay driver <name>, /bay headless on|off, /bay app|url|port|notes <text>, /bay save',
+      description: 'This session’s browser bay: /bay, /bay <name>, /bay focus, /bay allow, /bay driver <name>, /bay headless on|off, /bay app|url|port|notes <text>, /bay save',
     })
     await $.tool.register({
       name: 'bay_info',
@@ -458,6 +551,11 @@ export const register: Register = on => {
       }
     }
     if (verb === 'focus') return { text: await focus($) }
+
+    if (verb === 'allow') {
+      await openPane($)
+      return { text: await allowText($) }
+    }
 
     if (verb === 'headless') {
       if (!mine) return { text: 'This session has no bay.' }
@@ -570,6 +668,20 @@ export const register: Register = on => {
                   />
                 )}
               </Box>
+              {row.ruleState === 'none' && (
+                <Box>
+                  <Text dimColor>   edits ask under auto mode </Text>
+                  <Button
+                    key={`allow-${row.id}`}
+                    label="Allow"
+                    onPress={async () => {
+                      $.ui.toast(await allowBay($, row))
+                      await refreshRows($)
+                    }}
+                  />
+                </Box>
+              )}
+              {row.ruleState === 'held' && <Text dimColor>   a deny or ask rule in your user settings keeps edits reviewed</Text>}
               <Text dimColor>   app: {app ?? '—'} · url: {url ?? '—'}{port ? ` · port ${port}` : ''}{notes ? ` · ${notes}` : ''}</Text>
             </Box>
           )
