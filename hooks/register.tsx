@@ -131,6 +131,7 @@ async function refreshRows($: Dollar) {
       brief: state === 'taken' ? await sharedBrief($, bay) : undefined,
       holderPid: pid,
       isChromeRunning: Boolean(await chromePid($, bay)),
+      isAllowed: await isAllowed($, bay),
     })
   }
   await update($, rows, () => list)
@@ -235,6 +236,65 @@ async function effective($: Dollar): Promise<(Assigned & Brief) | null> {
 
 function toolPrefix(server: string) {
   return `mcp__${server.replace(/[^A-Za-z0-9_-]/g, '_')}__`
+}
+
+// Auto mode: settings allow rules resolve before the classifier, and subagents
+// are judged against the main session's rules, so a bay whose edits should run
+// unattended needs one rule in the user's settings. The plugin never adds it on
+// its own: only the Allow button in /bays (a person's click) writes it.
+function allowRule(bay: Bay): string {
+  return `${toolPrefix(`plugin:${PLUGIN}:${bay.id}`)}*`
+}
+
+async function settingsPath($: Dollar): Promise<string> {
+  const { stdout } = await $.process.run(['printenv', 'CLAUDE_CONFIG_DIR'])
+  if (stdout.trim()) return `${stdout.trim()}/settings.json`
+  const h = await $.process.run(['printenv', 'HOME'])
+  return `${h.stdout.trim()}/.claude/settings.json`
+}
+
+async function readSettings($: Dollar): Promise<Record<string, unknown>> {
+  try {
+    const raw = await $.fs.read(await settingsPath($))
+    return JSON.parse(typeof raw === 'string' ? raw : String((raw as { text?: string }).text ?? '{}'))
+  } catch {
+    return {}
+  }
+}
+
+function allowList(settings: Record<string, unknown>): string[] {
+  const allow = (settings.permissions as { allow?: unknown } | undefined)?.allow
+  return Array.isArray(allow) ? allow.filter((r): r is string => typeof r === 'string') : []
+}
+
+// A bay counts as allowed by its server rule, bare or with __*.
+async function isAllowed($: Dollar, bay: Bay): Promise<boolean> {
+  const rules = allowList(await readSettings($))
+  const rule = allowRule(bay)
+  return rules.includes(rule) || rules.includes(rule.replace(/__\*$/, ''))
+}
+
+async function allowBay($: Dollar, bay: Bay): Promise<string> {
+  const path = await settingsPath($)
+  const settings = await readSettings($)
+  const rule = allowRule(bay)
+  if (await isAllowed($, bay)) return `Bay ${bay.name} is already allowed in ${path}.`
+  const permissions = (settings.permissions ?? {}) as Record<string, unknown>
+  settings.permissions = { ...permissions, allow: [...allowList(settings), rule] }
+  try {
+    await $.fs.write(path, JSON.stringify(settings, null, 2) + '\n')
+  } catch {
+    return `Could not write ${path}. Add "${rule}" to permissions.allow yourself (/permissions).`
+  }
+  return `Added "${rule}" to ${path}. New sessions and their subagents drive bay ${bay.name} without a prompt.`
+}
+
+async function allowText($: Dollar): Promise<string> {
+  const { bays } = await config($)
+  const out = [`Under auto mode, clicks and key presses in a bay need an allow rule in ${await settingsPath($)}:`]
+  for (const bay of bays) out.push(`  ${bay.emoji} ${bay.name.padEnd(6)} ${(await isAllowed($, bay)) ? 'allowed' : 'not allowed'}  ${allowRule(bay)}`)
+  out.push('Press Allow on a bay in /bays to add its rule, or add it with /permissions. Bays are shared: a rule covers every session that takes that bay.')
+  return out.join('\n')
 }
 
 function describe(bay: Assigned & Brief): string {
@@ -360,7 +420,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'bays', description: 'Show the browser bays and which session holds each' })
     await $.command.register({
       name: 'bay',
-      description: 'This session’s browser bay: /bay, /bay <name>, /bay focus, /bay driver <name>, /bay headless on|off, /bay app|url|port|notes <text>, /bay save',
+      description: 'This session’s browser bay: /bay, /bay <name>, /bay focus, /bay allow, /bay driver <name>, /bay headless on|off, /bay app|url|port|notes <text>, /bay save',
     })
     await $.tool.register({
       name: 'bay_info',
@@ -458,6 +518,11 @@ export const register: Register = on => {
       }
     }
     if (verb === 'focus') return { text: await focus($) }
+
+    if (verb === 'allow') {
+      await openPane($)
+      return { text: await allowText($) }
+    }
 
     if (verb === 'headless') {
       if (!mine) return { text: 'This session has no bay.' }
@@ -570,6 +635,19 @@ export const register: Register = on => {
                   />
                 )}
               </Box>
+              {!row.isAllowed && (
+                <Box>
+                  <Text dimColor>   edits ask under auto mode </Text>
+                  <Button
+                    key={`allow-${row.id}`}
+                    label="Allow"
+                    onPress={async () => {
+                      $.ui.toast(await allowBay($, row))
+                      await refreshRows($)
+                    }}
+                  />
+                </Box>
+              )}
               <Text dimColor>   app: {app ?? '—'} · url: {url ?? '—'}{port ? ` · port ${port}` : ''}{notes ? ` · ${notes}` : ''}</Text>
             </Box>
           )

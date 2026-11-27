@@ -2,6 +2,11 @@
 
 Releases are tagged `browser-bays--v<version>` (`claude plugin tag --push`).
 
+## Unreleased
+
+- `/bay allow` and an **Allow** button per bay in `/bays`: shows the allow rule auto mode needs for agents to click and type in a bay, and adds it to your user settings only when you press Allow.
+- README: Permissions under auto mode.
+
 ## 0.1.0
 
 First release.

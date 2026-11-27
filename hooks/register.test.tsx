@@ -48,3 +48,33 @@ test('a session with a bay shows it, its mode and what it is for', async ($, on)
   expect(await ui.find({ type: 'Button', key: 'focus' })).toBeDefined()
   await ui.unmount()
 })
+
+test('the bays pane offers Allow only on bays auto mode would still review', async ($, on) => {
+  const row = { color: '#0090FF', emoji: '🔵', headless: false, driver: 'chrome-devtools', isChromeRunning: false }
+  on('state.get', (_, e) => {
+    return (
+      e.key === 'rows'
+        ? {
+            value: {
+              value: [
+                { ...row, id: 'bay-1', name: 'red', state: 'free', isAllowed: true },
+                { ...row, id: 'bay-2', name: 'blue', state: 'free', isAllowed: false },
+              ],
+              version: 1,
+            },
+          }
+        : { value: { version: 0 } }
+    ) as never
+  })
+
+  const ui = await $.ui.mount({
+    plugin: 'browser-bays',
+    component: 'Pane',
+    requestId: 'browser-bays',
+    surface: 'terminal',
+    props: { bodyColumns: 120, view: {} },
+  } as never)
+  expect(await ui.find({ type: 'Button', key: 'allow-bay-2' })).toBeDefined()
+  expect(await ui.find({ type: 'Button', key: 'allow-bay-1' })).toBeUndefined()
+  await ui.unmount()
+})

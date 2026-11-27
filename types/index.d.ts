@@ -32,6 +32,8 @@ export type BayRow = Bay & {
   state: 'mine' | 'taken' | 'free'
   holderPid?: string
   isChromeRunning: boolean
+  /** The user's settings allow this bay's tools, so auto mode does not review them. */
+  isAllowed: boolean
   /** What the holding session says it uses the bay for. */
   brief?: Brief
 }
