@@ -261,8 +261,11 @@ const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null 
 // when it exists but cannot be read or is not a settings object. Writers must
 // stop on null: writing then would replace the user's file.
 async function loadSettings($: Dollar, path: string): Promise<Json | null> {
-  const probe = await $.process.run(['sh', '-c', 'test -e "$1" && echo yes', 'sh', path])
-  if (probe.stdout.trim() !== 'yes') return {}
+  // Only a clear "no" means missing; an empty or odd answer means unknown.
+  const probe = await $.process.run(['sh', '-c', 'if test -e "$1"; then echo yes; elif test -d "$(dirname "$1")"; then echo no; fi', 'sh', path])
+  const seen = probe.stdout.trim()
+  if (seen === 'no') return {}
+  if (seen !== 'yes') return null
   try {
     const raw = await $.fs.read(path)
     if (typeof raw !== 'string') return null
@@ -287,7 +290,7 @@ function bayRuleState(settings: Json | null, bay: Bay): RuleState {
   if (!settings) return 'unreadable'
   const rule = allowRule(bay)
   const server = rule.replace(/__\*$/, '')
-  const hits = (r: string) => r === rule || r === server || r === 'mcp__*' || r.startsWith(`${server}__`)
+  const hits = (r: string) => r === rule || r === server || r === 'mcp__*' || r === '*'
   if (rules(settings, 'deny').some(hits) || rules(settings, 'ask').some(hits)) return 'held'
   return rules(settings, 'allow').some(r => r === rule || r === server) ? 'allowed' : 'none'
 }

@@ -98,7 +98,7 @@ test('a pane row whose bay a deny or ask rule covers says so and offers no Allow
   await ui.unmount()
 })
 
-for (const [label, body] of [['invalid JSON', '{ "hooks": '], ['null', 'null'], ['an array', '[]'], ['string permissions', '{"permissions":"x"}']] as const) {
+for (const [label, body, probe] of [['invalid JSON', '{ "hooks": ', 'yes'], ['null', 'null', 'yes'], ['an array', '[]', 'yes'], ['string permissions', '{"permissions":"x"}', 'yes'], ['an existence check that answered nothing', '{}', '']] as const) {
   test(`Allow leaves a settings file holding ${label} untouched`, async ($, on) => {
     const writes: string[] = []
     let stub = true
@@ -113,7 +113,7 @@ for (const [label, body] of [['invalid JSON', '{ "hooks": '], ['null', 'null'], 
     on('ui.toast', () => ({ value: undefined }) as never)
         on('process.run', (_, e) => {
       const argv = (e as { argv?: string[]; command?: string[] }).argv ?? (e as { command?: string[] }).command ?? []
-      const out = argv[0] === 'printenv' ? (argv[1] === 'HOME' ? '/home/t\n' : '') : argv[0] === 'sh' ? 'yes\n' : ''
+      const out = argv[0] === 'printenv' ? (argv[1] === 'HOME' ? '/home/t\n' : '') : argv[0] === 'sh' ? `${probe}\n` : ''
       return { value: { stdout: out, stderr: '', code: 0 } } as never
     })
     on('fs.read', () => ({ value: body }) as never)
@@ -124,7 +124,6 @@ for (const [label, body] of [['invalid JSON', '{ "hooks": '], ['null', 'null'], 
     const ui = await $.ui.mount({ plugin: 'browser-bays', component: 'Pane', requestId: 'browser-bays', surface: 'terminal', props: { bodyColumns: 120, view: {} } } as never)
     const allow = await ui.find({ type: 'Button', key: 'allow-bay-2' })
     expect(allow).toBeDefined()
-    stub = false
     stub = false
   await (ui as unknown as { press: (q: unknown) => Promise<void> }).press({ type: "Button", key: "allow-bay-2" })
     expect(writes.filter(p => p.endsWith('settings.json'))).toEqual([])
